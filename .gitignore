@@ -1,0 +1,17 @@
+
+
+# Local configuration and generated files
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+data/
+output/
+updated/
+*.log
+.idea/
+.vscode/
