@@ -250,8 +250,8 @@ print(result["messages"][-1].content)
 
 **验收**：
 
-- [ ] 理解普通函数、工具对象和 Agent 是三个不同层次。
-- [ ] 观察到工具请求与工具结果。
+- [X] 理解普通函数、工具对象和 Agent 是三个不同层次。
+- [X] 观察到工具请求与工具结果。
 - [ ] 能说明为什么模型不能仅靠声明工具名字就执行操作。
 
 ## 5. 独立管理提示词
@@ -296,9 +296,9 @@ sub_agents_content = config["sub_agents"]
 
 **验收**：
 
-- [ ] 能区分 YAML 缩进错误与模型执行错误。
-- [ ] 能解释 description 和 system_prompt 的用途区别。
-- [ ] 已创建的 Agent 不会因为文件被编辑就必然自动更新。
+- [X] 能区分 YAML 缩进错误与模型执行错误。
+- [X] 能解释 description 和 system_prompt 的用途区别。
+- [X] 已创建的 Agent 不会因为文件被编辑就必然自动更新。
 
 ## 6. 从单 Agent 升级为主 Agent + 搜索子 Agent
 

@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent 异步与 WebSocket 练习</title>
+
+  <style>
+    body {
+      max-width: 900px;
+      margin: 30px auto;
+      padding: 0 16px;
+      font-family: system-ui, sans-serif;
+      line-height: 1.6;
+    }
+
+    textarea {
+      width: 100%;
+      box-sizing: border-box;
+      min-height: 100px;
+      padding: 12px;
+      font: inherit;
+    }
+
+    button {
+      margin-top: 12px;
+      padding: 10px 20px;
+      cursor: pointer;
+    }
+
+    #status {
+      margin: 16px 0;
+    }
+
+    #logs {
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 16px;
+      min-height: 160px;
+    }
+
+    .entry {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      border-bottom: 1px solid #eee;
+      padding: 10px 0;
+    }
+
+    .error {
+      color: #b42318;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Agent 执行观察</h1>
+
+  <textarea id="query">请调用市场情报助手，搜索中国智能眼镜市场的公开消息，总结三条趋势并附来源链接。</textarea>
+
+  <button id="send">发送任务</button>
+
+  <div id="status">尚未连接</div>
+  <div id="logs"></div>
+
+  <script>
+    const input = document.querySelector("#query");
+    const button = document.querySelector("#send");
+    const status = document.querySelector("#status");
+    const logs = document.querySelector("#logs");
+
+    let socket = null;
+
+    function appendLog(event, message) {
+      const element = document.createElement("div");
+      element.className =
+        "entry" + (event === "error" ? " error" : "");
+
+      // 使用 textContent，按文本显示，避免把回答当作 HTML 执行。
+      element.textContent = `[${event}]\n${message}`;
+      logs.appendChild(element);
+    }
+
+    button.addEventListener("click", async () => {
+      const query = input.value.trim();
+      if (!query) return;
+
+      button.disabled = true;
+      logs.replaceChildren();
+
+      const threadId = crypto.randomUUID();
+      const protocol =
+        location.protocol === "https:" ? "wss:" : "ws:";
+
+      const ws = new WebSocket(
+        `${protocol}//${location.host}/ws/${threadId}`
+      );
+
+      socket = ws;
+      let finished = false;
+
+      // 先安装消息处理，再提交任务。
+      ws.onmessage = event => {
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.event === "pong") return;
+
+          appendLog(data.event, data.message);
+
+          if (
+            data.event === "task_finished" ||
+            data.event === "error"
+          ) {
+            finished = true;
+            status.textContent =
+              data.event === "error" ? "任务失败" : "任务结束";
+
+            button.disabled = false;
+            ws.close();
+          }
+        } catch (error) {
+          appendLog("error", `处理消息失败：${error.message}`);
+        }
+      };
+
+      ws.onclose = () => {
+        // 旧连接关闭时，不覆盖新任务的页面状态。
+        if (socket !== ws) return;
+
+        if (!finished) {
+          status.textContent = "连接已断开";
+          appendLog(
+            "error",
+            "连接已断开，无法继续接收进度。后台任务不一定停止。"
+          );
+          button.disabled = false;
+        }
+      };
+
+      try {
+        status.textContent = "正在连接消息通道……";
+
+        // 必须等 WebSocket 打开后，才发 POST 请求。
+        await new Promise((resolve, reject) => {
+          const cleanup = () => {
+            clearTimeout(timer);
+            ws.removeEventListener("open", opened);
+            ws.removeEventListener("error", failed);
+            ws.removeEventListener("close", failed);
+          };
+
+          const opened = () => {
+            cleanup();
+            resolve();
+          };
+
+          const failed = () => {
+            cleanup();
+            reject(new Error("WebSocket 连接失败"));
+          };
+
+          const timer = setTimeout(() => {
+            cleanup();
+            reject(new Error("WebSocket 连接超时"));
+          }, 10000);
+
+          ws.addEventListener("open", opened);
+          ws.addEventListener("error", failed);
+          ws.addEventListener("close", failed);
+        });
+
+        status.textContent = "已连接，正在提交任务……";
+
+        const response = await fetch("/api/task", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            query: query,
+            thread_id: threadId
+          })
+        });
+
+        if (!response.ok) {
+          const detail = await response.text();
+          throw new Error(
+            `任务提交失败：HTTP ${response.status}\n${detail}`
+          );
+        }
+
+        const data = await response.json();
+
+        // 任务可能在 POST 响应到达前就已推送结束事件。
+        if (!finished) {
+          status.textContent =
+            `任务已提交，会话编号：${data.thread_id}`;
+        }
+
+      } catch (error) {
+        finished = true;
+        appendLog("error", error.message);
+        status.textContent = "连接或提交失败";
+        button.disabled = false;
+        ws.close();
+      }
+    });
+  </script>
+</body>
+</html>
