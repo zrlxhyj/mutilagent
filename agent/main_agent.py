@@ -9,10 +9,16 @@ import logging
 from agent.prompts import main_agent_content
 from api.monitor import monitor
 from api.context import set_thread_id,get_thread_id,reset_thread_id
+from api.context import get_session_dir,set_session_dir,reset_session_dir
 from agent.subagents.network_search_agent import network_search_agent
 from contextlib import asynccontextmanager
+from tools.markdown_tools import generate_markdown,prepare_session_dir
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from agent.subagents.database_query_agent import database_query_agent
+from agent.subagents.knowledge_base_agent import ask_knowledge_agent
+from agent.subagents.local_knowledge_agent import local_rag_knowledge_agent
 
+PROJECT_TOOT=Path(__file__).resolve().parents[1]
 checkpoint_path=(
     Path(__file__).resolve().parents[1]
     /"data"
@@ -22,8 +28,9 @@ def create_main_agent(checkpointer):
     """Create and return the main agent."""
     return create_deep_agent(
         model=model,
+        tools=[generate_markdown],
         system_prompt=main_agent_content["system_prompt"],
-        subagents=[network_search_agent],
+        subagents=[network_search_agent,database_query_agent,local_rag_knowledge_agent,ask_knowledge_agent],
         checkpointer=checkpointer,
     )
 main_agent = None
@@ -65,14 +72,24 @@ async def agent_lifespan():
 async def run_deep_agent(task_query: str,session_id):
     """执行打印任务，打印该任务的更新."""
     token = set_thread_id(session_id)
+    # 目录上下文还没设置时，没有可用于恢复的token。
+    directory_token = None
     print(f"{session_id},任务开始")
     try:
         if main_agent is None:
          raise RuntimeError("智能体尚未初始化，请先进入 agent_lifespan")
         monitor.report_start()
-        question=(
+        # 创建目录并放入当前任务上下文。
+        directory = prepare_session_dir(session_id)
+        directory_token = set_session_dir(str(directory))
+        question = (
             f"当前日期：{date.today().isoformat()}。\n"
-            f"用户问题：{task_query}"
+            f"用户问题：{task_query}\n\n"
+            "【文件保存说明】\n"
+            "程序已为本次会话准备输出目录。\n"
+            "需要保存报告时，调用generate_markdown。\n"
+            "只提供完整报告内容和简单文件名，不要提供目录。\n"
+            "只有工具返回status=saved，才能告知用户文件已保存。\n"
         )
         config = {
             "configurable": {
